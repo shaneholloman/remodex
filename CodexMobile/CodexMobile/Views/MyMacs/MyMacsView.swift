@@ -12,9 +12,15 @@ struct MyMacsView: View {
     let onScanQRCode: () -> Void
     let onSwitchMac: (String) -> Void
     let onForgetMac: (String) -> Void
+    let isSwitchingMac: Bool
+    let switchingMacDeviceId: String?
 
     @State private var pendingForgetDeviceId: String?
     @State private var pendingSwitchDeviceId: String?
+
+    private var currentTrustedMac: CodexTrustedMacRecord? {
+        codex.currentTrustedMacRecord
+    }
 
     private var sortedTrustedMacs: [CodexTrustedMacRecord] {
         codex.trustedMacRegistry.records.values.sorted { lhs, rhs in
@@ -29,53 +35,36 @@ struct MyMacsView: View {
     }
 
     var body: some View {
-        List {
-            if let trustedPairPresentation = codex.trustedPairPresentation {
-                Section("Current Mac") {
-                    TrustedPairSummaryView(presentation: trustedPairPresentation)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
-            }
+        ZStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
-            Section("Paired Macs") {
-                if sortedTrustedMacs.isEmpty {
-                    Text("No paired Macs yet.")
-                        .font(AppFont.body())
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(sortedTrustedMacs, id: \.macDeviceId) { trustedMac in
-                        Button {
-                            handleSwitchSelection(for: trustedMac.macDeviceId)
-                        } label: {
-                            MyMacRowView(
-                                trustedMac: trustedMac,
-                                isCurrent: trustedMac.macDeviceId == codex.normalizedCurrentTrustedMacDeviceId,
-                                isConnected: trustedMac.macDeviceId == codex.normalizedRelayMacDeviceId && codex.isConnected
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(trustedMac.macDeviceId == codex.normalizedCurrentTrustedMacDeviceId)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                pendingForgetDeviceId = trustedMac.macDeviceId
-                            } label: {
-                                Text("Forget")
-                            }
-                        }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let currentTrustedMac {
+                        sectionTitle("Current Mac")
+                        currentMacCard(for: currentTrustedMac)
                     }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        sectionTitle("Paired Macs")
+                        pairedMacsCard
+                    }
+
+                    scanButton
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 28)
             }
 
-            Section {
-                Button("Scan QR Code") {
-                    onScanQRCode()
-                }
-                .font(AppFont.body(weight: .semibold))
+            if isSwitchingMac {
+                switchingOverlay
             }
         }
-        .font(AppFont.body())
         .navigationTitle("My Macs")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isSwitchingMac)
         .confirmationDialog(
             "Switch Mac?",
             isPresented: Binding(
@@ -127,84 +116,78 @@ struct MyMacsView: View {
         )
     }
 
-    private var requiresSwitchConfirmation: Bool {
-        !codex.runningThreadIDs.isEmpty
-            || !codex.protectedRunningFallbackThreadIDs.isEmpty
-            || !codex.activeTurnIdByThread.isEmpty
+    private var pairedMacsCard: some View {
+        MyMacCard {
+            if sortedTrustedMacs.isEmpty {
+                Text("No paired Macs yet.")
+                    .font(AppFont.body())
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(sortedTrustedMacs.enumerated()), id: \.element.macDeviceId) { index, trustedMac in
+                        pairedMacRow(for: trustedMac)
+
+                        if index < sortedTrustedMacs.count - 1 {
+                            Divider()
+                                .padding(.leading, 54)
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    private func handleSwitchSelection(for deviceId: String) {
-        if requiresSwitchConfirmation {
-            pendingSwitchDeviceId = deviceId
-            return
+    private func currentMacCard(for trustedMac: CodexTrustedMacRecord) -> some View {
+        let identity = displayIdentity(for: trustedMac)
+        let status = statusLabel(for: trustedMac)
+        let detail = detailLabel(for: trustedMac)
+
+        return MyMacCard {
+            HStack(alignment: .center, spacing: 12) {
+                macAvatar
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(identity.primaryName)
+                        .font(AppFont.subheadline(weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let secondaryName = identity.secondaryName {
+                        Text(secondaryName)
+                            .font(AppFont.caption())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text([status, detail].compactMap { $0 }.joined(separator: " · "))
+                        .font(AppFont.caption())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+
+                if isSwitchingMac, switchingMacDeviceId == trustedMac.macDeviceId {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
         }
-        onSwitchMac(deviceId)
-    }
-}
-
-private struct MyMacRowView: View {
-    let trustedMac: CodexTrustedMacRecord
-    let isCurrent: Bool
-    let isConnected: Bool
-
-    private var primaryName: String {
-        let nickname = SidebarMacNicknameStore.nickname(for: trustedMac.macDeviceId)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !nickname.isEmpty {
-            return nickname
-        }
-
-        let systemName = trustedMac.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let systemName, !systemName.isEmpty {
-            return systemName
-        }
-
-        return "Mac"
-    }
-
-    private var secondaryName: String? {
-        let nickname = SidebarMacNicknameStore.nickname(for: trustedMac.macDeviceId)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let systemName = trustedMac.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !nickname.isEmpty,
-              let systemName,
-              !systemName.isEmpty else {
-            return nil
-        }
-        return systemName
     }
 
-    private var statusText: String {
-        if isConnected {
-            return "Connected"
-        }
-        if isCurrent {
-            return "Current"
-        }
-        return "Saved"
-    }
+    private func pairedMacRow(for trustedMac: CodexTrustedMacRecord) -> some View {
+        let isCurrent = trustedMac.macDeviceId == codex.normalizedCurrentTrustedMacDeviceId
+        let isSwitching = trustedMac.macDeviceId == switchingMacDeviceId
+        let identity = displayIdentity(for: trustedMac)
 
-    private var timestampText: String? {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        let referenceDate = trustedMac.lastUsedAt ?? trustedMac.lastPairedAt
-        return formatter.localizedString(for: referenceDate, relativeTo: Date())
-    }
+        return HStack(alignment: .center, spacing: 12) {
+            macAvatar
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "desktopcomputer")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, height: 34)
-                .background(
-                    Circle()
-                        .fill(Color.primary.opacity(0.06))
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(primaryName)
+                    Text(identity.primaryName)
                         .font(AppFont.body(weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -216,25 +199,188 @@ private struct MyMacRowView: View {
                     }
                 }
 
-                if let secondaryName {
+                if let secondaryName = identity.secondaryName {
                     Text(secondaryName)
                         .font(AppFont.caption())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                HStack(spacing: 6) {
-                    Text(statusText)
-                    if let timestampText {
-                        Text("· \(timestampText)")
-                    }
+                Text([statusLabel(for: trustedMac), detailLabel(for: trustedMac)].compactMap { $0 }.joined(separator: " · "))
+                    .font(AppFont.caption())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard !isSwitchingMac, !isCurrent else {
+                    return
                 }
-                .font(AppFont.caption())
-                .foregroundStyle(.secondary)
+                handleSwitchSelection(for: trustedMac.macDeviceId)
             }
 
-            Spacer(minLength: 0)
+            if isSwitching {
+                ProgressView()
+                    .controlSize(.small)
+            } else if !isCurrent {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Button {
+                pendingForgetDeviceId = trustedMac.macDeviceId
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSwitchingMac)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 12)
+    }
+
+    private var scanButton: some View {
+        Button("Scan QR Code") {
+            guard !isSwitchingMac else {
+                return
+            }
+            onScanQRCode()
+        }
+        .font(AppFont.body(weight: .semibold))
+        .foregroundStyle(Color.accentColor)
+        .frame(maxWidth: .infinity)
+        .frame(height: 56)
+        .adaptiveGlass(.regular, in: Capsule())
+        .disabled(isSwitchingMac)
+    }
+
+    private var switchingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+
+            MyMacCard {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Switching Mac…")
+                        .font(AppFont.subheadline(weight: .semibold))
+                        .foregroundStyle(.primary)
+
+                    if let switchingMacDeviceId,
+                       let trustedMac = codex.trustedMacRecord(for: switchingMacDeviceId) {
+                        Text(displayIdentity(for: trustedMac).primaryName)
+                            .font(AppFont.caption())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 180)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.horizontal, 24)
+        }
+        .transition(.opacity)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(AppFont.body(weight: .medium))
+            .foregroundStyle(.secondary)
+    }
+
+    private var requiresSwitchConfirmation: Bool {
+        !codex.runningThreadIDs.isEmpty
+            || !codex.protectedRunningFallbackThreadIDs.isEmpty
+            || !codex.activeTurnIdByThread.isEmpty
+    }
+
+    private func handleSwitchSelection(for deviceId: String) {
+        guard !isSwitchingMac else {
+            return
+        }
+
+        if requiresSwitchConfirmation {
+            pendingSwitchDeviceId = deviceId
+            return
+        }
+        onSwitchMac(deviceId)
+    }
+
+    private func displayIdentity(for trustedMac: CodexTrustedMacRecord) -> MyMacDisplayIdentity {
+        let nickname = SidebarMacNicknameStore.nickname(for: trustedMac.macDeviceId)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let systemName = trustedMac.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !nickname.isEmpty, let systemName, !systemName.isEmpty {
+            return MyMacDisplayIdentity(primaryName: nickname, secondaryName: systemName)
+        }
+
+        if !nickname.isEmpty {
+            return MyMacDisplayIdentity(primaryName: nickname, secondaryName: nil)
+        }
+
+        if let systemName, !systemName.isEmpty {
+            return MyMacDisplayIdentity(primaryName: systemName, secondaryName: nil)
+        }
+
+        return MyMacDisplayIdentity(primaryName: "Mac", secondaryName: nil)
+    }
+
+    private func statusLabel(for trustedMac: CodexTrustedMacRecord) -> String {
+        if trustedMac.macDeviceId == switchingMacDeviceId {
+            return "Switching"
+        }
+        if trustedMac.macDeviceId == codex.normalizedRelayMacDeviceId && codex.isConnected {
+            return "Connected"
+        }
+        if trustedMac.macDeviceId == codex.normalizedCurrentTrustedMacDeviceId {
+            return "Selected"
+        }
+        return "Saved"
+    }
+
+    private func detailLabel(for trustedMac: CodexTrustedMacRecord) -> String? {
+        if trustedMac.macDeviceId == switchingMacDeviceId {
+            return "Reloading chats…"
+        }
+
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        let referenceDate = trustedMac.lastUsedAt ?? trustedMac.lastPairedAt
+        return formatter.localizedString(for: referenceDate, relativeTo: Date())
+    }
+
+    private var macAvatar: some View {
+        Image(systemName: "desktopcomputer")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 34, height: 34)
+            .background(
+                Circle()
+                    .fill(Color.primary.opacity(0.06))
+            )
+    }
+}
+
+private struct MyMacDisplayIdentity {
+    let primaryName: String
+    let secondaryName: String?
+}
+
+private struct MyMacCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .adaptiveGlass(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
     }
 }

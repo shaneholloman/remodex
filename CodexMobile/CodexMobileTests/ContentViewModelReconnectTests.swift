@@ -135,6 +135,45 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertNil(service.normalizedRelayMacDeviceId)
     }
 
+    func testPreferredReconnectURLUsesExplicitTargetMacInsteadOfCurrentMacDuringSwitch() async {
+        let service = makeService()
+        let viewModel = ContentViewModel()
+        let currentMacDeviceID = "mac-current-\(UUID().uuidString)"
+        let targetMacDeviceID = "mac-target-\(UUID().uuidString)"
+        let currentRelayURL = "wss://relay.current/relay"
+        let targetRelayURL = "wss://relay.target/relay"
+
+        service.trustedMacRegistry.records[currentMacDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: currentMacDeviceID,
+            macIdentityPublicKey: Data(repeating: 41, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: currentRelayURL
+        )
+        service.trustedMacRegistry.records[targetMacDeviceID] = CodexTrustedMacRecord(
+            macDeviceId: targetMacDeviceID,
+            macIdentityPublicKey: Data(repeating: 42, count: 32).base64EncodedString(),
+            lastPairedAt: Date(),
+            relayURL: targetRelayURL
+        )
+        service.setCurrentTrustedMacDeviceId(currentMacDeviceID)
+        service.trustedSessionResolverOverride = {
+            CodexTrustedSessionResolveResponse(
+                ok: true,
+                macDeviceId: targetMacDeviceID,
+                macIdentityPublicKey: Data(repeating: 43, count: 32).base64EncodedString(),
+                displayName: "Target Mac",
+                sessionId: "target-session"
+            )
+        }
+
+        let reconnectURL = await viewModel.preferredReconnectURL(
+            codex: service,
+            targetMacDeviceId: targetMacDeviceID
+        )
+
+        XCTAssertEqual(reconnectURL, "\(targetRelayURL)/target-session")
+    }
+
     func testForegroundReconnectStopsAfterRetryLimitWithRetryableFailures() async {
         let service = makeService()
         let viewModel = ContentViewModel()

@@ -300,7 +300,9 @@ struct ContentView: View {
                         MyMacsView(
                             onScanQRCode: presentMyMacsScanner,
                             onSwitchMac: switchToTrustedMac,
-                            onForgetMac: forgetTrustedMac
+                            onForgetMac: forgetTrustedMac,
+                            isSwitchingMac: viewModel.isSwitchingMac,
+                            switchingMacDeviceId: viewModel.switchingMacDeviceId
                         )
                         .adaptiveNavigationBar()
                     }
@@ -735,6 +737,9 @@ struct ContentView: View {
     }
 
     private func switchToTrustedMac(_ deviceId: String) {
+        guard !viewModel.isSwitchingMac else {
+            return
+        }
         prepareForMacContextTransition()
         Task {
             do {

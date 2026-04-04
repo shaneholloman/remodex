@@ -16,6 +16,8 @@ final class ContentViewModel {
     private let reconnectSleepChunkNanoseconds: UInt64 = 100_000_000
     private(set) var isRunningAutoReconnect = false
     private(set) var isRunningManualReconnect = false
+    private(set) var isSwitchingMac = false
+    private(set) var switchingMacDeviceId: String?
     private var shouldCancelManualReconnect = false
     // Test hooks keep reconnect verification fast without changing production retry behavior.
     @ObservationIgnored var reconnectAttemptLimitOverride: Int?
@@ -417,7 +419,10 @@ extension ContentViewModel {
         codex: CodexService,
         targetMacDeviceId: String?
     ) async -> String? {
-        switch await trustedReconnectResolution(codex: codex) {
+        switch await trustedReconnectResolution(
+            codex: codex,
+            targetMacDeviceId: targetMacDeviceId
+        ) {
         case .use(let resolvedURL):
             return resolvedURL
         case .fallbackToSaved:
@@ -540,6 +545,16 @@ extension ContentViewModel {
         guard normalizedTargetMacDeviceId != codex.normalizedCurrentTrustedMacDeviceId else {
             return
         }
+        guard !isSwitchingMac else {
+            return
+        }
+
+        isSwitchingMac = true
+        switchingMacDeviceId = normalizedTargetMacDeviceId
+        defer {
+            switchingMacDeviceId = nil
+            isSwitchingMac = false
+        }
 
         let previousCurrentTrustedMacDeviceId = codex.normalizedCurrentTrustedMacDeviceId
         let previousErrorMessage = codex.lastErrorMessage
@@ -589,6 +604,17 @@ extension ContentViewModel {
     }
 
     func switchToScannedMac(pairingPayload: CodexPairingQRPayload, codex: CodexService) async throws {
+        guard !isSwitchingMac else {
+            return
+        }
+
+        isSwitchingMac = true
+        switchingMacDeviceId = pairingPayload.macDeviceId
+        defer {
+            switchingMacDeviceId = nil
+            isSwitchingMac = false
+        }
+
         let previousCurrentTrustedMacDeviceId = codex.normalizedCurrentTrustedMacDeviceId
         let previousErrorMessage = codex.lastErrorMessage
         let previousRelaySessionSnapshot = captureRelaySessionSnapshot(from: codex)
