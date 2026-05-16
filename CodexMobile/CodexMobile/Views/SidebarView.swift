@@ -14,12 +14,12 @@ struct SidebarView: View {
     @Environment(CodexService.self) private var codex
 
     @Binding var selectedThread: CodexThread?
-    @Binding var showSettings: Bool
     @Binding var isSearchActive: Bool
     var showsInlineCloseButton: Bool = false
     var isVisible: Bool = true
 
     let onClose: () -> Void
+    let onOpenSettings: () -> Void
     let onOpenTerminal: () -> Void
     let onNewChatCreationStateChange: (Bool) -> Void
     let onOpenThread: (CodexThread) -> Void
@@ -297,15 +297,13 @@ struct SidebarView: View {
     private func openSettings() {
         searchText = ""
         isSearchActive = false
-        showSettings = true
-        onClose()
+        onOpenSettings()
     }
 
     private func openTerminal() {
         searchText = ""
         isSearchActive = false
         onOpenTerminal()
-        onClose()
     }
 
     // Clears sidebar-only input state before navigation so full-width search mode cannot hold the drawer open.
