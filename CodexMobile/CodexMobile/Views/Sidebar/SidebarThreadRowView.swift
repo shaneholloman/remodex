@@ -23,6 +23,17 @@ struct SidebarThreadRowView: View {
     var onArchiveToggle: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
+    // Read here only so we can re-inject `codex` across the
+    // `UIHostingController` boundary that `.uiKitContextMenu` adds: SwiftUI
+    // environment values do NOT propagate through a representable-built
+    // host, so without this re-injection `SidebarSubagentNameLabel` would
+    // fault on `@Environment(CodexService.self)` inside the wrapped row.
+    // The row body itself never touches any property on `codex`, so the
+    // "no service observation in the parent row" invariant documented on
+    // `SidebarSubagentNameLabel` is preserved (only that nested label
+    // subscribes to `codex.subagentIdentityVersion`).
+    @Environment(CodexService.self) private var codex
+
     @State private var renamePrompt = ThreadRenamePromptState()
 
     var body: some View {
@@ -40,7 +51,12 @@ struct SidebarThreadRowView: View {
             }
         }
         .padding(.horizontal, 6)
-        .contextMenu {
+        // Re-inject `codex` so `SidebarSubagentNameLabel` (which lives
+        // inside the row body and reads `@Environment(CodexService.self)`)
+        // still resolves the service after `.uiKitContextMenu` wraps the
+        // chain in a `UIHostingController`.
+        .environment(codex)
+        .uiKitContextMenu {
             SidebarThreadContextMenu(
                 thread: thread,
                 isPinned: isPinned,
@@ -50,6 +66,7 @@ struct SidebarThreadRowView: View {
                 onPinToggle: onPinToggle,
                 onDelete: onDelete
             )
+            .uiMenu()
         }
         .threadRenamePrompt(state: $renamePrompt) { newName in
             onRename?(newName)

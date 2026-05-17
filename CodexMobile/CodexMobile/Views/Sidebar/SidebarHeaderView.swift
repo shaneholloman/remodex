@@ -5,9 +5,11 @@
 //          share one visual treatment.
 // Layer: View Component
 // Exports: SidebarHeaderView, SidebarOverflowMenuActions
-// Depends on: SwiftUI, SidebarToolbarIconButton, RemodexIcon, AdaptiveGlassModifier
+// Depends on: SwiftUI, UIKit, SidebarToolbarIconButton, RemodexIcon,
+//             AdaptiveGlassModifier, UIKitMenuButton, HapticFeedback
 
 import SwiftUI
+import UIKit
 
 struct SidebarOverflowMenuActions {
     var isEnabled: Bool
@@ -55,11 +57,12 @@ struct SidebarHeaderView: View {
     }
 
     private var appLogo: some View {
-        Image("AppLogo")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 30, height: 30)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // Custom SF Symbol so the glyph picks up the same font-driven
+        // scaling SwiftUI gives native symbols; semibold has its own asset
+        // because interpolated weights are too subtle for this custom mark.
+        Image("remodex_symbol_semibold")
+            .font(.system(size: 20))
+            .foregroundStyle(.primary)
     }
 
     // Close affordance kept inside the sidebar so both drawer and full-width
@@ -73,52 +76,57 @@ struct SidebarHeaderView: View {
     }
 
     private var overflowMenuButton: some View {
-        Menu {
-            Section {
-                Button {
-                    overflowActions.onNewChat()
-                } label: {
-                    overflowMenuLabel("New Chat", systemName: "square.and.pencil")
-                }
-
-                Button {
-                    overflowActions.onQuickChat()
-                } label: {
-                    overflowMenuLabel("Quick Chat", systemName: "message")
-                }
-
-                Button {
-                    overflowActions.onNewProject()
-                } label: {
-                    overflowMenuLabel("New Project", systemName: "folder.badge.plus")
-                }
-            }
-        } label: {
-            // Reuses the same toolbar button shell so the ellipsis trigger
-            // matches the surrounding settings + hamburger glyphs exactly.
-            SidebarToolbarIconButton(
-                icon: .systemImage("ellipsis"),
-                accessibilityLabel: "More actions",
-                action: {}
-            )
-            .allowsHitTesting(false)
-        }
-        // SwiftUI Menu paints its label with the ambient accent tint (blue by
-        // default), which overrides the `.foregroundStyle(.primary)` set
-        // inside `SidebarToolbarIconButton`. Re-anchor the tint to `.primary`
-        // so the ellipsis glyph matches the surrounding settings / hamburger.
-        .tint(.primary)
+        // Routed through `UIKitMenuButton` so the leading glyphs render
+        // through `RemodexIcon.menuUIImage` at the SF Symbol menu glyph
+        // metric, matching the rest of the sidebar's UIKit-rendered menus.
+        UIKitMenuButton(
+            label: {
+                // Reuses the same toolbar button shell so the ellipsis trigger
+                // matches the surrounding settings + hamburger glyphs exactly.
+                SidebarToolbarIconButton(
+                    icon: .systemImage("ellipsis"),
+                    accessibilityLabel: "More actions",
+                    action: {}
+                )
+                .allowsHitTesting(false)
+            },
+            menu: { buildOverflowMenu() }
+        )
         .disabled(!overflowActions.isEnabled)
         .opacity(overflowActions.isEnabled ? 1 : 0.4)
         .accessibilityLabel("More actions")
     }
 
-    // Delegated to the shared `RemodexIcon.menuLabel` helper; SwiftUI Menus
-    // require `Label(_, image:)` / `Label(_, systemImage:)` (not the closure
-    // initializer) to render a leading icon.
-    @ViewBuilder
-    private func overflowMenuLabel(_ title: String, systemName: String) -> some View {
-        RemodexIcon.menuLabel(title, systemName: systemName)
+    private func buildOverflowMenu() -> UIMenu {
+        UIMenu(
+            title: "",
+            options: [.displayInline],
+            children: [
+                overflowAction(title: "New Chat", systemName: "square.and.pencil") {
+                    overflowActions.onNewChat()
+                },
+                overflowAction(title: "Quick Chat", systemName: "message") {
+                    overflowActions.onQuickChat()
+                },
+                overflowAction(title: "New Project", systemName: "folder.badge.plus") {
+                    overflowActions.onNewProject()
+                },
+            ]
+        )
+    }
+
+    private func overflowAction(
+        title: String,
+        systemName: String,
+        handler: @escaping () -> Void
+    ) -> UIAction {
+        UIAction(
+            title: title,
+            image: RemodexIcon.menuUIImage(systemName: systemName)
+        ) { _ in
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            handler()
+        }
     }
 }
 

@@ -18,7 +18,7 @@ struct SidebarThreadGroupBlock<Content: View>: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 4)
             .background(
-                Color(.tertiarySystemBackground),
+                Color(.clear),
                 in: RoundedRectangle(cornerRadius: 24, style: .continuous)
             )
             .padding(.bottom, bottomPadding)

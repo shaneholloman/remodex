@@ -5,7 +5,8 @@
 //          label, trailing 30pt slot) matches every other sidebar section.
 // Layer: View Component
 // Exports: SidebarPinnedSectionHeader
-// Depends on: SwiftUI, SidebarSectionHeader, SidebarPinIcon, RemodexIcon, AppFont
+// Depends on: SwiftUI, SidebarSectionHeader, SidebarSectionExpansionChevron,
+//             SidebarPinIcon
 
 import SwiftUI
 
@@ -23,17 +24,10 @@ struct SidebarPinnedSectionHeader: View {
                 SidebarPinIcon(style: .header)
             },
             trailing: {
-                // Match the chat/subagent expansion chevron weight and size;
-                // the shared section slot handles alignment, while the glyph
-                // itself should stay visually quiet.
-                RemodexIcon.image(systemName: "chevron.right")
-                    .font(AppFont.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary.opacity(0.6))
-                    .frame(width: 18, height: 18)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
-            },
-            contextMenuContent: { EmptyView() }
+                SidebarSectionExpansionChevron(isExpanded: isExpanded)
+            }
+            // Pinned section has no context menu; omit `contextMenu:` so
+            // the shared header skips the UIKit interaction overhead.
         )
         .padding(.horizontal, 16)
     }

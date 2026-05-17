@@ -95,12 +95,13 @@ struct ArchivedChatsView: View {
             }
             .tint(.blue)
         }
-        .contextMenu {
+        .uiKitContextMenu {
             SidebarThreadContextMenu(
                 thread: thread,
                 onArchiveToggle: { codex.unarchiveThread(thread.id) },
                 onDelete: { threadPendingDeletion = thread }
             )
+            .uiMenu()
         }
     }
 }

@@ -147,6 +147,48 @@ enum RemodexIcon {
         }
         return image?.withConfiguration(configuration)
     }
+
+    /// Returns a UIImage suitable for `UIAction(image:)` / `UIMenu(image:)`
+    /// rows so Central artwork visually matches the SF Symbol "menu glyph"
+    /// metric that UIKit applies to native symbols inside menus.
+    ///
+    /// Why this exists:
+    /// - SF Symbols rendered via `UIImage(systemName:)` get a built-in menu
+    ///   glyph treatment from UIKit (~17pt body-equivalent, regular weight).
+    /// - `UIImage(named:)` for our Central SVG assets does NOT get that
+    ///   treatment: UIMenu draws them at their intrinsic asset size (24pt)
+    ///   so they read visibly larger than the SF Symbols in the same row.
+    /// - Pre-rendering the Central asset to `menuGlyphPointSize` × that size
+    ///   as a template image makes the menu row draw it at the matching
+    ///   metric, restoring visual parity row-to-row.
+    ///
+    /// Dynamic Type is honored via `UIFontMetrics`, mirroring how SF Symbols
+    /// in menus scale with the user's preferred content size.
+    static func menuUIImage(systemName: String) -> UIImage? {
+        guard let assetName = assetName(for: systemName) else {
+            return UIImage(systemName: systemName)
+        }
+        guard let base = UIImage(named: assetName) else { return nil }
+        let pointSize = menuGlyphPointSize
+        let size = CGSize(width: pointSize, height: pointSize)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let resized = renderer.image { _ in
+            base.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return resized.withRenderingMode(.alwaysTemplate)
+    }
+
+    // Larger than the ~17pt body-equivalent SF Symbol menu glyph: the
+    // Central artwork's thin stroke reads visually smaller than an SF Symbol
+    // at the same point size, so bumping to 20pt gives the custom glyphs
+    // the "a little bolder than native" feel the design calls for without
+    // going back to the original 24pt mismatch this helper was introduced
+    // to fix.
+    private static var menuGlyphPointSize: CGFloat {
+        UIFontMetrics.default.scaledValue(for: 20)
+    }
 }
 
 // SF Symbol used purely as a sizing anchor for custom assets. Picked because

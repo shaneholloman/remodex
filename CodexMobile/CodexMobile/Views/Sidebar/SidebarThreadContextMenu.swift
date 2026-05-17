@@ -1,16 +1,18 @@
 // FILE: SidebarThreadContextMenu.swift
-// Purpose: Shared context-menu content for thread-row long-press surfaces in
-//          the sidebar and the Archived Chats screen. Each action is optional
-//          so each callsite only opts into the entries it supports (e.g. the
-//          archived list omits Pin and Rename). All actions are routed through
-//          `HapticButton` so the long-press feedback stays consistent.
-// Layer: View Component
+// Purpose: Shared `UIMenu` builder for the thread-row long-press surfaces in
+//          the sidebar and the Archived Chats screen. Each action is
+//          optional so each callsite only opts into the entries it supports
+//          (e.g. the archived list omits Pin and Rename). Used via the
+//          `.uiKitContextMenu` modifier so the leading icons render at the
+//          SF Symbol menu glyph metric — see `UIKitContextMenu.swift` and
+//          `RemodexIcon.menuUIImage` for why we go through UIKit here.
+// Layer: View Helper
 // Exports: SidebarThreadContextMenu
-// Depends on: SwiftUI, HapticButton, RemodexIcon, CodexThread
+// Depends on: UIKit, RemodexIcon, HapticFeedback, CodexThread
 
-import SwiftUI
+import UIKit
 
-struct SidebarThreadContextMenu: View {
+struct SidebarThreadContextMenu {
     let thread: CodexThread
     /// Drives the Pin / Unpin label. Ignored when `onPinToggle` is nil.
     var isPinned: Bool = false
@@ -20,44 +22,70 @@ struct SidebarThreadContextMenu: View {
     var onPinToggle: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
-    var body: some View {
-        // `RemodexIcon.menuLabel` keeps Central artwork inside SwiftUI's
-        // contextMenu (the closure-based `Label { } icon: { }` path used by
-        // `RemodexIcon.label` gets stripped to title-only by the renderer).
+    func uiMenu() -> UIMenu {
+        var children: [UIMenuElement] = []
+
         if let onCopySessionId {
-            HapticButton(action: onCopySessionId) {
-                RemodexIcon.menuLabel("Copy sessionId", systemName: "doc.on.doc")
-            }
+            children.append(makeAction(
+                title: "Copy sessionId",
+                systemImage: "doc.on.doc",
+                handler: onCopySessionId
+            ))
         }
 
         if let onRename {
-            HapticButton(action: onRename) {
-                RemodexIcon.menuLabel("Rename", systemName: "pencil")
-            }
+            children.append(makeAction(
+                title: "Rename",
+                systemImage: "pencil",
+                handler: onRename
+            ))
         }
 
         if let onArchiveToggle {
-            HapticButton(action: onArchiveToggle) {
-                RemodexIcon.menuLabel(
-                    thread.syncState == .archivedLocal ? "Unarchive" : "Archive",
-                    systemName: thread.syncState == .archivedLocal ? "tray.and.arrow.up" : "archivebox"
-                )
-            }
+            let isArchived = thread.syncState == .archivedLocal
+            children.append(makeAction(
+                title: isArchived ? "Unarchive" : "Archive",
+                systemImage: isArchived ? "tray.and.arrow.up" : "archivebox",
+                handler: onArchiveToggle
+            ))
         }
 
         if let onPinToggle, thread.syncState != .archivedLocal, !thread.isSubagent {
-            HapticButton(action: onPinToggle) {
-                RemodexIcon.menuLabel(
-                    isPinned ? "Unpin" : "Pin",
-                    systemName: isPinned ? "pin.slash" : "pin"
-                )
-            }
+            children.append(makeAction(
+                title: isPinned ? "Unpin" : "Pin",
+                systemImage: isPinned ? "pin.slash" : "pin",
+                handler: onPinToggle
+            ))
         }
 
         if let onDelete {
-            HapticButton(role: .destructive, action: onDelete) {
-                RemodexIcon.menuLabel("Remove from Phone", systemName: "trash")
-            }
+            children.append(makeAction(
+                title: "Remove from Phone",
+                systemImage: "trash",
+                attributes: .destructive,
+                handler: onDelete
+            ))
+        }
+
+        return UIMenu(title: "", options: [.displayInline], children: children)
+    }
+
+    private func makeAction(
+        title: String,
+        systemImage: String,
+        attributes: UIMenuElement.Attributes = [],
+        handler: @escaping () -> Void
+    ) -> UIAction {
+        UIAction(
+            title: title,
+            image: RemodexIcon.menuUIImage(systemName: systemImage),
+            attributes: attributes
+        ) { _ in
+            // Match the haptic feedback HapticButton used to give SwiftUI
+            // context menu rows so the long-press experience stays
+            // consistent after the UIKit bridge.
+            HapticFeedback.shared.triggerImpactFeedback(style: .light)
+            handler()
         }
     }
 }

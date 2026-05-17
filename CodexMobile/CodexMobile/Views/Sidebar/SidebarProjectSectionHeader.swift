@@ -1,16 +1,18 @@
 // FILE: SidebarProjectSectionHeader.swift
 // Purpose: Tappable header for a project section. Hosts the project glyph and
-//          label on the leading edge and a trailing "new chat in project"
-//          composer button. Exposes context-menu hooks for archive/delete.
-//          Built on top of the shared `SidebarSectionHeader` so the leading
-//          icon, label, and trailing slot share the same slot grid used by
-//          every other sidebar section (Pinned, rootless Chats, ...).
+//          label-side expansion chevron on the leading edge and a trailing
+//          "new chat in project" composer button. Exposes context-menu hooks
+//          for archive/delete. Built on top of the shared `SidebarSectionHeader`
+//          so the leading icon, label, and trailing slot share the same slot
+//          grid used by every other sidebar section (Pinned, rootless Chats, ...).
 // Layer: View Component
 // Exports: SidebarProjectSectionHeader
-// Depends on: SwiftUI, SidebarSectionHeader, HapticButton, SidebarThreadGroup,
-//             RemodexIcon, CodexWorktreeIcon, AppFont
+// Depends on: SwiftUI, UIKit, SidebarSectionHeader, HapticButton,
+//             SidebarSectionExpansionChevron, SidebarThreadGroup, RemodexIcon,
+//             CodexWorktreeIcon, AppFont, HapticFeedback
 
 import SwiftUI
+import UIKit
 
 struct SidebarProjectSectionHeader: View {
     let group: SidebarThreadGroup
@@ -27,8 +29,11 @@ struct SidebarProjectSectionHeader: View {
             label: group.label,
             onToggle: onToggle,
             leadingIcon: { leadingIcon },
+            labelAccessory: {
+                SidebarSectionExpansionChevron(isExpanded: isExpanded)
+            },
             trailing: { composeButton },
-            contextMenuContent: { contextMenuContent }
+            contextMenu: hasContextMenu ? { buildContextMenu() } : nil
         )
     }
 
@@ -65,19 +70,39 @@ struct SidebarProjectSectionHeader: View {
         .disabled(!isConnected || isCreatingThread)
     }
 
-    @ViewBuilder
-    private var contextMenuContent: some View {
+    private var hasContextMenu: Bool {
+        onArchive != nil || onDelete != nil
+    }
+
+    private func buildContextMenu() -> UIMenu {
+        var children: [UIMenuElement] = []
+
         if let onArchive {
-            HapticButton(action: onArchive) {
-                RemodexIcon.menuLabel("Archive Project", systemName: "archivebox")
-            }
+            children.append(
+                UIAction(
+                    title: "Archive Project",
+                    image: RemodexIcon.menuUIImage(systemName: "archivebox")
+                ) { _ in
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    onArchive()
+                }
+            )
         }
 
         if let onDelete {
-            HapticButton(role: .destructive, action: onDelete) {
-                Label("Remove from Phone", systemImage: "trash")
-            }
+            children.append(
+                UIAction(
+                    title: "Remove from Phone",
+                    image: RemodexIcon.menuUIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { _ in
+                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                    onDelete()
+                }
+            )
         }
+
+        return UIMenu(title: "", options: [.displayInline], children: children)
     }
 
     private var resolvedIconName: String {
