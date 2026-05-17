@@ -1,16 +1,25 @@
 // FILE: SidebarView.swift
 // Purpose: Orchestrates the sidebar experience with modular presentation components.
-//          Top: brand toolbar. Body: native scroll with search + project / chat list.
-//          Bottom: SidebarBottomActionBar with the primary Chat FAB (glass on
-//          iOS 26, accent pill on iOS 18).
+//          Top: brand toolbar + leading-aligned live connection status badge
+//          (auto-hides when fully connected). Body: native scroll with search +
+//          project / chat list, swapped for a centered connect/reconnect/scan-QR
+//          card when the relay is offline and no cached chats exist. Bottom:
+//          SidebarBottomActionBar with the primary Chat FAB (glass on iOS 26,
+//          accent pill on iOS 18).
 // Layer: View
 // Exports: SidebarView
 // Depends on: CodexService, SidebarHeaderView, SidebarThreadListView,
-//             SidebarBottomActionBar, SidebarSearchField
+//             SidebarBottomActionBar, SidebarSearchField,
+//             SidebarConnectionStatusBadge,
+//             SidebarConnectionEmptyStatePanel, SidebarConnectionEmptyStateFooter
 
 import SwiftUI
 
-struct SidebarView: View {
+struct SidebarView<
+    ConnectionStatusBadge: View,
+    ConnectionEmptyStatePanel: View,
+    ConnectionEmptyStateFooter: View
+>: View {
     @Environment(CodexService.self) private var codex
 
     @Binding var selectedThread: CodexThread?
@@ -23,6 +32,17 @@ struct SidebarView: View {
     let onOpenTerminal: () -> Void
     let onNewChatCreationStateChange: (Bool) -> Void
     let onOpenThread: (CodexThread) -> Void
+    // Top-left status pill rendered just below the brand header. Owns its own
+    // pulse animation and self-hides when the relay is fully `.connected`, so
+    // the happy-path sidebar reads as uncluttered.
+    @ViewBuilder let connectionStatusBadge: () -> ConnectionStatusBadge
+    // Centered connect/reconnect card shown when the relay is offline and the
+    // sidebar has no cached chats. ContentView owns the underlying connection
+    // state and actions; the sidebar just slots the panel into the empty area.
+    @ViewBuilder let connectionEmptyStatePanel: () -> ConnectionEmptyStatePanel
+    // Status message + Forget Pair, pinned just above the bottom action bar
+    // during the connect/reconnect empty state. ContentView owns the actions.
+    @ViewBuilder let connectionEmptyStateFooter: () -> ConnectionEmptyStateFooter
 
     @State private var searchText = ""
     @State private var isCreatingThread = false
@@ -214,8 +234,8 @@ struct SidebarView: View {
     private func handleNewChatTap(preferredProjectPath: String?) {
         createThreadErrorMessage = nil
         isCreatingThread = true
-        onNewChatCreationStateChange(true)
         prepareSidebarForChatNavigation()
+        onNewChatCreationStateChange(true)
         Task { @MainActor in
             defer {
                 isCreatingThread = false
@@ -240,8 +260,8 @@ struct SidebarView: View {
     private func handleNewWorktreeChatTap(preferredProjectPath: String) {
         createThreadErrorMessage = nil
         isCreatingThread = true
-        onNewChatCreationStateChange(true)
         prepareSidebarForChatNavigation()
+        onNewChatCreationStateChange(true)
         Task { @MainActor in
             defer {
                 isCreatingThread = false
@@ -417,30 +437,83 @@ struct SidebarView: View {
     // iOS 26 bar while dropping taps from the Terminal pill inside the drawer.
     @ViewBuilder
     private var threadListWithBottomBar: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                SidebarSearchField(text: $searchText, isActive: $isSearchActive)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-
-                if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
-                    isLoadingThreads: codex.isLoadingThreads,
-                    threadCount: codex.threads.count
-                ) {
-                    SidebarThreadsInlineLoadingView()
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.opacity)
+        if shouldShowConnectionEmptyState {
+            // Stacked safe-area insets: the inner inset hosts the footer (status
+            // message + Forget Pair) and ends up directly above the bottom
+            // action bar, which is added by the outer inset. SwiftUI lays insets
+            // bottom-up in the order they're declared.
+            connectionEmptyStateLayout
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    connectionEmptyStateFooter()
                 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottomActionBar
+                }
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    SidebarSearchField(text: $searchText, isActive: $isSearchActive)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
 
-                threadList
+                    // Leading-aligned status pill, just below the search field.
+                    // Owns its own padding + collapses to a pure EmptyView when
+                    // the relay is fully connected, so the row vanishes on the
+                    // happy path and the thread list flows up underneath.
+                    connectionStatusBadge()
+
+                    if SidebarThreadsLoadingPresentation.shouldShowInlineStatus(
+                        isLoadingThreads: codex.isLoadingThreads,
+                        threadCount: codex.threads.count
+                    ) {
+                        SidebarThreadsInlineLoadingView()
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                            .transition(.opacity)
+                    }
+
+                    threadList
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomActionBar
             }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomActionBar
+    }
+
+    // Keeps the search field at the top so the user can return to a filtered
+    // list as soon as chats sync, while centering the connect panel between
+    // the header and the safe-area footer.
+    private var connectionEmptyStateLayout: some View {
+        VStack(spacing: 0) {
+            SidebarSearchField(text: $searchText, isActive: $isSearchActive)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            connectionStatusBadge()
+
+            Spacer(minLength: 0)
+
+            connectionEmptyStatePanel()
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // Only swap to the centered connect card on a true cold start: no cached
+    // chats, no live search, and no relay session. Users with cached chats
+    // keep the regular list so they can still tap through to a thread.
+    private var shouldShowConnectionEmptyState: Bool {
+        guard !codex.isConnected else { return false }
+        guard codex.threads.isEmpty else { return false }
+        guard !isSearchActive else { return false }
+        let trimmedQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedQuery.isEmpty
     }
 
     private var threadList: some View {
@@ -453,6 +526,7 @@ struct SidebarView: View {
             selectedThread: selectedThread,
             bottomContentInset: 0,
             timingLabelProvider: { SidebarRelativeTimeFormatter.compactLabel(for: $0) },
+            showsTimestampRefreshIndicator: { codex.snapshotOnlyPinnedThreadIDs.contains($0.id) },
             runBadgeStateByThreadID: cachedRunBadges,
             onSelectThread: selectThread,
             onCreateThreadInProjectGroup: { group in

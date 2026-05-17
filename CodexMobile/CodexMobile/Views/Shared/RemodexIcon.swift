@@ -17,6 +17,8 @@ enum RemodexIcon {
         "arrow.up.right.square": "central-fork-code",
         "at": "central-at",
         "bell.badge": "central-bell-2",
+        "bolt": "central-lightning",
+        "bolt.fill": "central-lightning",
         "brain": "central-brain",
         "bubble.left.and.bubble.right": "central-bubble-5",
         "camera.fill": "central-camera-1",
@@ -27,10 +29,11 @@ enum RemodexIcon {
         "command": "central-cmd",
         "control": "central-control-key-left",
         "cube": "central-3d-box-top",
-        "desktopcomputer": "central-macbook-air",
-        "ellipsis": "central-dot-grid-1x3-horizontal",
+        "desktopcomputer": "central-imac",
+        "doc.on.doc": "copy",
         "doc.text": "central-page-text",
         "doc.text.magnifyingglass": "central-page-search-lines",
+        "ellipsis": "central-dot-grid-1x3-horizontal",
         "envelope": "central-email-1",
         "exclamationmark.circle": "central-exclamation-circle",
         "exclamationmark.circle.fill": "central-exclamation-circle-bold",
@@ -81,7 +84,7 @@ enum RemodexIcon {
         "speedometer": "central-dashboard-fast",
         "remodex.fork": "central-fork-code",
         "remodex.git-branch": "git-branch",
-        "square.and.pencil": "central-edit-big",
+        "square.and.pencil": "central-compose-pencil",
         "square.stack.3d.up": "central-layers-three",
         "square.stack.3d.up.slash": "central-layers-behind",
         "terminal": "central-console",
@@ -117,6 +120,20 @@ enum RemodexIcon {
             Text(title)
         } icon: {
             image(systemName: systemName)
+        }
+    }
+
+    // SwiftUI Menu / contextMenu strip Label's `icon:` closure and only render
+    // the title when given the closure-based initializer. The `Label(_, image:)`
+    // and `Label(_, systemImage:)` initializers ARE respected, so this helper
+    // routes through whichever one preserves the Central asset (or SF Symbol).
+    // Use this whenever a Label is the direct child of a Menu / Picker / contextMenu.
+    @ViewBuilder
+    static func menuLabel(_ title: String, systemName: String) -> some View {
+        if let assetName = assetName(for: systemName) {
+            Label(title, image: assetName)
+        } else {
+            Label(title, systemImage: systemName)
         }
     }
 

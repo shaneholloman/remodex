@@ -39,6 +39,7 @@ private struct AdaptiveGlassModifier<S: Shape>: ViewModifier {
     let fallbackMaterial: Material
     let shape: S
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26, *), glassEnabled {
             switch style {
@@ -47,6 +48,11 @@ private struct AdaptiveGlassModifier<S: Shape>: ViewModifier {
             case .regular:
                 content.glassEffect(resolvedGlass, in: shape)
             }
+        } else if let tint {
+            // When a tint is provided the caller wants a colored surface (e.g. an
+            // accent CTA pill). The Liquid Glass fallback `Material` would mute
+            // that color, so paint the tint directly as the fallback background.
+            content.background(tint, in: shape)
         } else {
             content.background(fallbackMaterial, in: shape)
         }
@@ -134,8 +140,13 @@ private struct AdaptiveToolbarItemModifier<S: Shape>: ViewModifier {
     let shape: S
 
     func body(content: Content) -> some View {
+        // On iOS 26 the system toolbar already wraps each `ToolbarItem` in an
+        // interactive Liquid Glass capsule/circle; stacking another
+        // `glassEffect` on top produced a visible double-background halo
+        // around the icon. Keep this a no-op there and let UIKit own the
+        // chrome; only the < iOS 26 fallback path needs the material backing.
         if #available(iOS 26, *), glassEnabled {
-            content.glassEffect(.regular.interactive(), in: shape)
+            content
         } else {
             content.background(.thinMaterial, in: shape)
         }

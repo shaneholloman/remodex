@@ -72,7 +72,7 @@ struct UserMessageBubble: View {
                         HapticFeedback.shared.triggerImpactFeedback(style: .light)
                         UIPasteboard.general.string = actionText
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        RemodexIcon.menuLabel("Copy", systemName: "doc.on.doc")
                     }
                 }
                 if isRetryAvailable, !actionText.isEmpty {

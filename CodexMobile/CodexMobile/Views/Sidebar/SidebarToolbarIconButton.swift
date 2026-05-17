@@ -6,7 +6,7 @@
 //          the composer secondary bar pills.
 // Layer: View Component
 // Exports: SidebarToolbarIconButton, SidebarToolbarIcon
-// Depends on: SwiftUI, RemodexIcon, AdaptiveGlassModifier
+// Depends on: SwiftUI, AdaptiveGlassModifier
 
 import SwiftUI
 
@@ -31,10 +31,7 @@ struct SidebarToolbarIconButton: View {
     var action: () -> Void
 
     var body: some View {
-        Button {
-            HapticFeedback.shared.triggerImpactFeedback(style: .light)
-            action()
-        } label: {
+        HapticButton(action: action) {
             iconView
                 .foregroundStyle(.primary)
                 .frame(width: diameter, height: diameter)
@@ -49,7 +46,8 @@ struct SidebarToolbarIconButton: View {
     private var iconView: some View {
         switch icon {
         case .systemImage(let name):
-            RemodexIcon.image(systemName: name, size: iconSize, weight: iconWeight)
+            Image(systemName: name)
+                .font(.system(size: iconSize, weight: iconWeight))
         case .custom(let view):
             view
         }

@@ -72,7 +72,9 @@ struct TurnComposerRuntimeMenuBuilder {
             contentsOf: CodexServiceTier.allCases.map { serviceTier in
                 UIAction(
                     title: serviceTier.displayName,
-                    image: RemodexIcon.uiImage(systemName: serviceTier.iconName),
+                    image: serviceTier == .fast
+                        ? UIImage(systemName: serviceTier.iconName)
+                        : RemodexIcon.uiImage(systemName: serviceTier.iconName),
                     state: runtimeState.isSelectedServiceTier(serviceTier) ? .on : .off
                 ) { _ in
                     runtimeActions.selectServiceTier(serviceTier)
@@ -82,7 +84,7 @@ struct TurnComposerRuntimeMenuBuilder {
 
         return UIMenu(
             title: "Speed",
-            image: RemodexIcon.uiImage(systemName: "bolt.fill"),
+            image: UIImage(systemName: "bolt.fill"),
             children: children
         )
     }

@@ -57,7 +57,7 @@ final class SidebarThreadGroupingTests: XCTestCase {
         XCTAssertEqual(groups[0].threads.map(\.id), ["thread-a", "thread-b"])
     }
 
-    func testMakeGroupsKeepsArchivedThreadsInDedicatedTrailingSection() {
+    func testMakeGroupsExcludesArchivedThreadsFromSidebarSections() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let threads = [
             makeThread(id: "live-thread", updatedAt: now, cwd: "/Users/me/work/app"),
@@ -71,10 +71,8 @@ final class SidebarThreadGroupingTests: XCTestCase {
 
         let groups = SidebarThreadGrouping.makeGroups(from: threads, now: now)
 
-        XCTAssertEqual(groups.map(\.id), ["project:/Users/me/work/app", "archived"])
-        XCTAssertEqual(groups[1].kind, .archived)
-        XCTAssertNil(groups[1].projectPath)
-        XCTAssertEqual(groups[1].threads.map(\.id), ["archived-thread"])
+        XCTAssertEqual(groups.map(\.id), ["project:/Users/me/work/app"])
+        XCTAssertEqual(groups.first?.threads.map(\.id), ["live-thread"])
     }
 
     func testMakeGroupsLiftsPinnedThreadsIntoDedicatedLeadingSection() {
@@ -113,9 +111,8 @@ final class SidebarThreadGroupingTests: XCTestCase {
             pinnedThreadIDs: ["archived-thread", "live-thread"]
         )
 
-        XCTAssertEqual(groups.map(\.id), ["pinned", "project:/Users/me/work/app", "archived"])
+        XCTAssertEqual(groups.map(\.id), ["pinned", "project:/Users/me/work/app"])
         XCTAssertEqual(groups.first?.threads.map(\.id), ["live-thread"])
-        XCTAssertEqual(groups[2].threads.map(\.id), ["archived-thread"])
     }
 
     func testMakeGroupsKeepsPinnedRootSubtreeTogetherAndOutOfProjectSection() {

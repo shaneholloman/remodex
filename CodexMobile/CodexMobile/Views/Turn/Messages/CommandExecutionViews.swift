@@ -538,7 +538,7 @@ struct CommandExecutionCardBody: View {
         HStack(spacing: 0) {
             (
                 Text(display.verb)
-                    .font(AppFont.subheadline(weight: .medium))
+                    .font(AppFont.subheadline())
                     .foregroundStyle(.secondary)
                 +
                 Text(" " + display.target)

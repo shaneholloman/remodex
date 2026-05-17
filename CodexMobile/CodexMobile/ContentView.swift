@@ -22,6 +22,7 @@ private enum RootSheetRoute: Identifiable, Equatable {
 }
 
 enum ContentNavigationRoute: Hashable {
+    case newChatOpening
     case thread(id: String)
     case settings
     case terminal(preferredWorkingDirectory: String?)
@@ -454,6 +455,8 @@ struct ContentView: View {
     @ViewBuilder
     private func navigationDestination(for route: ContentNavigationRoute) -> some View {
         switch route {
+        case .newChatOpening:
+            NewChatOpeningStateView()
         case .thread(let threadID):
             nativeThreadDestination(threadID: threadID)
         case .settings:
@@ -487,6 +490,64 @@ struct ContentView: View {
             },
             onOpenThread: { thread in
                 openThreadFromSidebar(thread)
+            },
+            connectionStatusBadge: {
+                SidebarConnectionStatusBadge(connectionPhase: homeConnectionPhase)
+            },
+            connectionEmptyStatePanel: {
+                sidebarConnectionEmptyStatePanel
+            },
+            connectionEmptyStateFooter: {
+                sidebarConnectionEmptyStateFooter
+            }
+        )
+    }
+
+    // Builds the connect/reconnect/scan-QR card shown inside the sidebar's
+    // empty state. Lives here so all sheet/scanner state stays owned by the
+    // root view; the sidebar just slots the panel into its centered layout.
+    private var sidebarConnectionEmptyStatePanel: some View {
+        SidebarConnectionEmptyStatePanel(
+            connectionPhase: homeConnectionPhase,
+            trustedPairPresentation: codex.trustedPairPresentation,
+            securityLabel: codex.secureConnectionState.statusLabel,
+            hasReconnectCandidate: codex.hasReconnectCandidate,
+            isWakingSavedMacDisplay: isWakingSavedMacDisplay,
+            shouldOfferWakeAction: shouldOfferWakeSavedMacDisplayAction,
+            isPreparingManualScanner: isPreparingManualScanner,
+            isResolvingManualPairingCode: isResolvingManualPairingCode,
+            offlinePrimaryButtonTitle: codex.hasReconnectCandidate ? "Reconnect" : "Scan QR Code",
+            onPrimaryAction: {
+                if homeConnectionPhase == .offline && !codex.hasReconnectCandidate {
+                    presentAutomaticScanner()
+                    return
+                }
+
+                Task {
+                    await viewModel.toggleConnection(codex: codex)
+                }
+            },
+            onScanNewQR: {
+                presentManualScannerAfterStoppingReconnect()
+            },
+            onPairWithCode: {
+                presentManualPairingEntryAfterStoppingReconnect()
+            },
+            onWakeMacDisplay: {
+                wakeSavedMacDisplay()
+            }
+        )
+    }
+
+    // Pinned footer that surfaces the long status message and the Forget Pair
+    // action just above the bottom action bar, keeping the centered panel
+    // focused on the primary reconnect CTA.
+    private var sidebarConnectionEmptyStateFooter: some View {
+        SidebarConnectionEmptyStateFooter(
+            statusMessage: codex.lastErrorMessage,
+            canForgetPair: codex.hasReconnectCandidate && !codex.isConnected,
+            onForgetPair: {
+                codex.forgetReconnectCandidate()
             }
         )
     }
@@ -974,11 +1035,18 @@ struct ContentView: View {
         return false
     }
 
+    // Pushes a real native route before `thread/start` returns so compact sidebar users see progress immediately.
     private func setNewChatOpeningState(_ isOpening: Bool) {
         isOpeningNewChatFromSidebar = isOpening
         if isOpening {
             selectedThread = nil
             codex.activeThreadId = nil
+            if shouldPresentSidebarAsNavigation {
+                navigationPath = [.newChatOpening]
+            }
+        } else if shouldPresentSidebarAsNavigation,
+                  navigationPath.last == .newChatOpening {
+            navigationPath.removeLast()
         }
     }
 

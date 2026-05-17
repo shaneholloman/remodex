@@ -1,5 +1,5 @@
 // FILE: SidebarThreadGrouping.swift
-// Purpose: Produces sidebar thread groups by project path (`cwd`) and keeps archived chats separate.
+// Purpose: Produces sidebar thread groups by project path (`cwd`) while excluding archived chats.
 // Layer: View Helper
 // Exports: SidebarThreadGroupKind, SidebarThreadGroup, SidebarThreadGrouping
 
@@ -8,7 +8,6 @@ import Foundation
 enum SidebarThreadGroupKind: Equatable {
     case pinned
     case project
-    case archived
 }
 
 struct SidebarProjectChoice: Identifiable, Equatable {
@@ -33,8 +32,6 @@ struct SidebarThreadGroup: Identifiable {
             return "pin"
         case .project:
             return CodexThread.projectIconSystemName(for: projectPath)
-        case .archived:
-            return "archivebox"
         }
     }
 
@@ -51,15 +48,8 @@ enum SidebarThreadGrouping {
         calendar _: Calendar = .current
     ) -> [SidebarThreadGroup] {
         var groups: [SidebarThreadGroup] = []
-        var archivedThreads: [CodexThread] = []
         let pinnedThreads = collectPinnedThreads(from: threads, pinnedRootThreadIDs: pinnedThreadIDs)
         let pinnedThreadIDSet = Set(pinnedThreads.map(\.id))
-
-        for thread in threads {
-            if thread.syncState == .archivedLocal {
-                archivedThreads.append(thread)
-            }
-        }
 
         if let firstPinned = pinnedThreads.first {
             groups.append(
@@ -75,20 +65,6 @@ enum SidebarThreadGrouping {
         }
 
         groups.append(contentsOf: makeProjectGroups(from: threads, excludingPinnedThreadIDs: pinnedThreadIDSet))
-
-        let sortedArchived = sortThreadsByRecentActivity(archivedThreads)
-        if let firstArchived = sortedArchived.first {
-            groups.append(
-                SidebarThreadGroup(
-                    id: "archived",
-                    label: "Archived (\(sortedArchived.count))",
-                    kind: .archived,
-                    sortDate: firstArchived.updatedAt ?? firstArchived.createdAt ?? .distantPast,
-                    projectPath: nil,
-                    threads: sortedArchived
-                )
-            )
-        }
 
         return groups
     }

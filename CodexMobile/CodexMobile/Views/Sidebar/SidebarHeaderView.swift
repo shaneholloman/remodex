@@ -29,7 +29,7 @@ struct SidebarHeaderView: View {
             HStack(spacing: 10) {
                 appLogo
                 Text("Remodex")
-                    .font(AppFont.system(size: 28, weight: .medium))
+                    .font(AppFont.system(size: 22, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -103,20 +103,22 @@ struct SidebarHeaderView: View {
             )
             .allowsHitTesting(false)
         }
+        // SwiftUI Menu paints its label with the ambient accent tint (blue by
+        // default), which overrides the `.foregroundStyle(.primary)` set
+        // inside `SidebarToolbarIconButton`. Re-anchor the tint to `.primary`
+        // so the ellipsis glyph matches the surrounding settings / hamburger.
+        .tint(.primary)
         .disabled(!overflowActions.isEnabled)
         .opacity(overflowActions.isEnabled ? 1 : 0.4)
         .accessibilityLabel("More actions")
     }
 
-    // UIKit-backed Menu rows cannot host arbitrary SwiftUI icon views reliably;
-    // pass the mapped asset name directly so custom central-* icons render.
+    // Delegated to the shared `RemodexIcon.menuLabel` helper; SwiftUI Menus
+    // require `Label(_, image:)` / `Label(_, systemImage:)` (not the closure
+    // initializer) to render a leading icon.
     @ViewBuilder
     private func overflowMenuLabel(_ title: String, systemName: String) -> some View {
-        if let assetName = RemodexIcon.assetName(for: systemName) {
-            Label(title, image: assetName)
-        } else {
-            Label(title, systemImage: systemName)
-        }
+        RemodexIcon.menuLabel(title, systemName: systemName)
     }
 }
 

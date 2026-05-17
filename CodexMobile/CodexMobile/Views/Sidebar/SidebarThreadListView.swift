@@ -14,6 +14,7 @@ struct SidebarThreadListView: View {
     let selectedThread: CodexThread?
     let bottomContentInset: CGFloat
     let timingLabelProvider: (CodexThread) -> String?
+    var showsTimestampRefreshIndicator: (CodexThread) -> Bool = { _ in false }
     let runBadgeStateByThreadID: [String: CodexThreadRunBadgeState]
     let onSelectThread: (CodexThread) -> Void
     let onCreateThreadInProjectGroup: (SidebarThreadGroup) -> Void
@@ -28,7 +29,6 @@ struct SidebarThreadListView: View {
     @State private var expandedProjectGroupIDs: Set<String> = []
     @State private var knownProjectGroupIDs: Set<String> = []
     @State private var hasInitializedProjectGroupExpansion = false
-    @State private var isArchivedExpanded = false
     @State private var isPinnedExpanded = true
     @State private var expandedSubagentParentIDs: Set<String> = []
     // Tracks project sections whose preview cap was manually lifted with Show more.
@@ -89,9 +89,6 @@ struct SidebarThreadListView: View {
             pinnedGroupSection(group)
         case .project:
             projectGroupSection(group)
-
-        case .archived:
-            archivedGroupSection(group)
         }
     }
 
@@ -99,51 +96,58 @@ struct SidebarThreadListView: View {
         let hierarchy = SidebarSubagentHierarchy(groupThreads: group.threads)
 
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isPinnedExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    RemodexIcon.image(systemName: "pin", size: 20, weight: .medium)
-                        .foregroundStyle(.primary)
-                    Text(group.label)
-                        .font(AppFont.body(weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Spacer()
-                    RemodexIcon.image(systemName: "chevron.right")
-                        .font(AppFont.caption(weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isPinnedExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.2), value: isPinnedExpanded)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.top, 6)
-            .padding(.bottom, 10)
-
-            if isPinnedExpanded {
-                VStack(spacing: 2) {
-                    ForEach(hierarchy.rootThreads) { thread in
-                        threadRowTree(
-                            thread,
-                            childrenByParentID: hierarchy.childrenByParentID,
-                            pinnedRootThreadIDs: Set(hierarchy.rootThreads.map(\.id))
-                        )
+            SidebarPinnedSectionHeader(
+                label: group.label,
+                isExpanded: isPinnedExpanded,
+                onToggle: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isPinnedExpanded.toggle()
                     }
                 }
-                .padding(.bottom, 14)
-                .transition(.opacity)
+            )
+
+            if isPinnedExpanded {
+                SidebarThreadGroupBlock {
+                    VStack(spacing: 2) {
+                        ForEach(hierarchy.rootThreads) { thread in
+                            threadRowTree(
+                                thread,
+                                childrenByParentID: hierarchy.childrenByParentID,
+                                pinnedRootThreadIDs: Set(hierarchy.rootThreads.map(\.id))
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 
     private func projectGroupSection(_ group: SidebarThreadGroup) -> some View {
+        let isExpanded = expandedProjectGroupIDs.contains(group.id)
+
+        // Skip the hierarchy / preview-cap calculations entirely when the
+        // group is collapsed. They were previously recomputed on every body
+        // pass (selection changes, badge updates, etc.) for every project in
+        // the sidebar, which dominated scroll/expand jank for users with many
+        // projects.
+        return VStack(alignment: .leading, spacing: 0) {
+            projectHeader(group)
+                .padding(.horizontal)
+
+            if isExpanded {
+                // Insertion transition is owned by `SidebarThreadGroupBlock`;
+                // the surrounding `withAnimation` in
+                // `toggleProjectGroupExpansion` still drives the height fold.
+                expandedProjectContent(group)
+            }
+        }
+        // `.clipped()` keeps the disappearing rows from briefly painting over
+        // the next project header while SwiftUI animates the height delta.
+        .clipped()
+    }
+
+    @ViewBuilder
+    private func expandedProjectContent(_ group: SidebarThreadGroup) -> some View {
         let hierarchy = SidebarSubagentHierarchy(groupThreads: group.threads)
         let visibleRootThreads = SidebarProjectThreadPreviewState.visibleRootThreads(
             for: group,
@@ -158,146 +162,37 @@ struct SidebarThreadListView: View {
             manuallyExpandedGroupIDs: revealedProjectGroupIDs
         )
 
-        return VStack(alignment: .leading, spacing: 0) {
-            projectHeader(group)
+        SidebarThreadGroupBlock {
+            VStack(spacing: 2) {
+                ForEach(visibleRootThreads) { thread in
+                    threadRowTree(
+                        thread,
+                        childrenByParentID: hierarchy.childrenByParentID
+                    )
+                }
 
-            if expandedProjectGroupIDs.contains(group.id) {
-                VStack(spacing: 2) {
-                    ForEach(visibleRootThreads) { thread in
-                        threadRowTree(
-                            thread,
-                            childrenByParentID: hierarchy.childrenByParentID
-                        )
-                    }
-
-                    if shouldShowMoreButton {
-                        let totalRootCount = SidebarProjectThreadPreviewState.rootThreads(in: group.threads).count
-                        let hiddenCount = totalRootCount - visibleRootThreads.count
-                        SidebarProjectShowMoreButton(hiddenCount: hiddenCount) {
-                            revealedProjectGroupIDs.insert(group.id)
-                        }
+                if shouldShowMoreButton {
+                    let totalRootCount = SidebarProjectThreadPreviewState.rootThreads(in: group.threads).count
+                    let hiddenCount = totalRootCount - visibleRootThreads.count
+                    SidebarProjectShowMoreButton(hiddenCount: hiddenCount) {
+                        revealedProjectGroupIDs.insert(group.id)
                     }
                 }
-                .padding(.bottom, 14)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.snappy(duration: 0.22), value: expandedProjectGroupIDs.contains(group.id))
     }
 
     private func projectHeader(_ group: SidebarThreadGroup) -> some View {
-        let isExpanded = expandedProjectGroupIDs.contains(group.id)
-
-        return HStack(spacing: 12) {
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                toggleProjectGroupExpansion(group.id)
-            } label: {
-                HStack(spacing: 8) {
-                    if group.iconSystemName == "arrow.triangle.branch" {
-                        CodexWorktreeIcon(pointSize: 16, weight: .medium)
-                            .foregroundStyle(.primary)
-                    } else {
-                        RemodexIcon.image(systemName: projectHeaderIconName(for: group, isExpanded: isExpanded))
-                            .font(AppFont.body(weight: .medium))
-                            .foregroundStyle(.primary)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                    Text(group.label)
-                        .font(AppFont.body(weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if let onArchiveProjectGroup {
-                    Button {
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        onArchiveProjectGroup(group)
-                    } label: {
-                        RemodexIcon.label("Archive Project", systemName: "archivebox")
-                    }
-                }
-
-                if let onDeleteProjectGroup {
-                    Button(role: .destructive) {
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        onDeleteProjectGroup(group)
-                    } label: {
-                        Label("Remove from Phone", systemImage: "trash")
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                Button {
-                    HapticFeedback.shared.triggerImpactFeedback()
-                    onCreateThreadInProjectGroup(group)
-                } label: {
-                    RemodexIcon.image(systemName: "square.and.pencil", size: 20, weight: .medium)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .disabled(!isConnected || isCreatingThread)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 10)
-    }
-
-    private func projectHeaderIconName(for group: SidebarThreadGroup, isExpanded: Bool) -> String {
-        if isExpanded, group.iconSystemName == "folder" {
-            return "folder.fill"
-        }
-        return group.iconSystemName
-    }
-
-    private func archivedGroupSection(_ group: SidebarThreadGroup) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isArchivedExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    RemodexIcon.image(systemName: "archivebox")
-                        .font(AppFont.body(weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text(group.label)
-                        .font(AppFont.body(weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Spacer()
-                    RemodexIcon.image(systemName: "chevron.right")
-                        .font(AppFont.caption(weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isArchivedExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.2), value: isArchivedExpanded)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
-
-            if isArchivedExpanded {
-                VStack(spacing: 4) {
-                    ForEach(group.threads) { thread in
-                        threadRow(thread)
-                    }
-                }
-                .padding(.bottom, 14)
-                .transition(.opacity)
-            }
-        }
+        SidebarProjectSectionHeader(
+            group: group,
+            isExpanded: expandedProjectGroupIDs.contains(group.id),
+            isConnected: isConnected,
+            isCreatingThread: isCreatingThread,
+            onToggle: { toggleProjectGroupExpansion(group.id) },
+            onCreate: { onCreateThreadInProjectGroup(group) },
+            onArchive: onArchiveProjectGroup.map { handler in { handler(group) } },
+            onDelete: onDeleteProjectGroup.map { handler in { handler(group) } }
+        )
     }
 
     private func threadRowTree(
@@ -336,8 +231,12 @@ struct SidebarThreadListView: View {
                         }
                     }
                 }
+                // Match project-group expansion: fade the inserted rows while the
+                // outer stack animates height, instead of sliding through siblings.
+                .transition(.opacity)
             }
-        })
+        }
+        .clipped())
     }
 
     private func threadRow(
@@ -354,6 +253,7 @@ struct SidebarThreadListView: View {
             isSelected: isSelected,
             runBadgeState: runBadgeStateByThreadID[thread.id],
             timingLabel: timingLabelProvider(thread),
+            showsTimestampRefreshIndicator: showsTimestampRefreshIndicator(thread),
             isPinned: codex.isThreadPinned(thread.id),
             pinnedProjectLabel: isPinnedRow ? thread.projectDisplayName : nil,
             childSubagentCount: childSubagentCount,
@@ -406,11 +306,6 @@ struct SidebarThreadListView: View {
                         ancestorThreadIDs: [],
                         into: &visibleThreadIDs
                     )
-                }
-            case .archived:
-                guard isArchivedExpanded else { continue }
-                for thread in group.threads where thread.isSubagent {
-                    visibleThreadIDs.append(thread.id)
                 }
             }
         }
@@ -511,10 +406,12 @@ struct SidebarThreadListView: View {
     }
 
     private func toggleSubagentExpansion(parentThreadID: String) {
-        if expandedSubagentParentIDs.contains(parentThreadID) {
-            expandedSubagentParentIDs.remove(parentThreadID)
-        } else {
-            expandedSubagentParentIDs.insert(parentThreadID)
+        withAnimation(.snappy(duration: 0.22)) {
+            if expandedSubagentParentIDs.contains(parentThreadID) {
+                expandedSubagentParentIDs.remove(parentThreadID)
+            } else {
+                expandedSubagentParentIDs.insert(parentThreadID)
+            }
         }
     }
 
@@ -536,4 +433,122 @@ struct SidebarThreadListView: View {
 
         return ancestorIDs
     }
+}
+
+// MARK: - Preview fixtures (UI iteration)
+//
+// Mirrors the screenshot layout: a Pinned section and two project sections
+// (`omnara-voice` and `phodex-bridge`) with several chats each. Edit
+// `SidebarThreadGroupBlock` to iterate on the block look; this preview will
+// reflect changes without needing to launch the simulator.
+
+private enum SidebarThreadListPreviewFixtures {
+    static let now = Date()
+
+    static func ago(_ minutes: Int) -> Date {
+        now.addingTimeInterval(TimeInterval(-minutes * 60))
+    }
+
+    static let pinnedThread = CodexThread(
+        id: "pinned-1",
+        title: "Investigate flaky tests",
+        createdAt: ago(720),
+        updatedAt: ago(8),
+        cwd: "/Users/dev/phodex-bridge"
+    )
+
+    static let omnaraThreads: [CodexThread] = [
+        CodexThread(id: "om-1", title: "Create Landing Page with AI Stuff", createdAt: ago(180), updatedAt: ago(2), cwd: "/Users/dev/omnara-voice"),
+        CodexThread(id: "om-2", title: "Create Landing Page with AI Stuff", createdAt: ago(170), updatedAt: ago(2), cwd: "/Users/dev/omnara-voice"),
+        CodexThread(id: "om-3", title: "Landing Page", createdAt: ago(160), updatedAt: ago(2), cwd: "/Users/dev/omnara-voice"),
+        CodexThread(id: "om-4", title: "App's UI", createdAt: ago(150), updatedAt: ago(2), cwd: "/Users/dev/omnara-voice"),
+        CodexThread(id: "om-5", title: "Backend", createdAt: ago(140), updatedAt: ago(2), cwd: "/Users/dev/omnara-voice"),
+    ]
+
+    static let bridgeThreads: [CodexThread] = [
+        CodexThread(id: "br-1", title: "Investigate flaky tests", createdAt: ago(800), updatedAt: ago(8), cwd: "/Users/dev/phodex-bridge"),
+        CodexThread(id: "br-2", title: "Refactor relay session store", createdAt: ago(900), updatedAt: ago(45), cwd: "/Users/dev/phodex-bridge"),
+        CodexThread(id: "br-3", title: "Wire QR pairing flow", createdAt: ago(1500), updatedAt: ago(220), cwd: "/Users/dev/phodex-bridge"),
+    ]
+
+    static let allThreads: [CodexThread] =
+        [pinnedThread] + omnaraThreads + bridgeThreads
+
+    static let groups: [SidebarThreadGroup] = [
+        SidebarThreadGroup(
+            id: "pinned",
+            label: "Pinned",
+            kind: .pinned,
+            sortDate: ago(8),
+            projectPath: nil,
+            threads: [pinnedThread]
+        ),
+        SidebarThreadGroup(
+            id: "/Users/dev/omnara-voice",
+            label: "omnara-voice",
+            kind: .project,
+            sortDate: ago(2),
+            projectPath: "/Users/dev/omnara-voice",
+            threads: omnaraThreads
+        ),
+        SidebarThreadGroup(
+            id: "/Users/dev/phodex-bridge",
+            label: "phodex-bridge",
+            kind: .project,
+            sortDate: ago(8),
+            projectPath: "/Users/dev/phodex-bridge",
+            threads: bridgeThreads
+        ),
+    ]
+
+    static let runBadges: [String: CodexThreadRunBadgeState] = [
+        "om-1": .running,
+        "om-3": .ready,
+        "br-1": .running,
+        "br-2": .ready,
+    ]
+
+    static func timingLabel(for thread: CodexThread) -> String? {
+        guard let updated = thread.updatedAt else { return nil }
+        let seconds = Int(now.timeIntervalSince(updated))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h"
+    }
+}
+
+@MainActor
+@ViewBuilder
+private func sidebarThreadBlockPreviewBody() -> some View {
+    ScrollView {
+        SidebarThreadListView(
+            isConnected: true,
+            isCreatingThread: false,
+            threads: SidebarThreadListPreviewFixtures.allThreads,
+            groups: SidebarThreadListPreviewFixtures.groups,
+            selectedThread: SidebarThreadListPreviewFixtures.omnaraThreads[2],
+            bottomContentInset: 80,
+            timingLabelProvider: SidebarThreadListPreviewFixtures.timingLabel,
+            runBadgeStateByThreadID: SidebarThreadListPreviewFixtures.runBadges,
+            onSelectThread: { _ in },
+            onCreateThreadInProjectGroup: { _ in },
+            onRenameThread: { _, _ in },
+            onPinToggleThread: { _ in },
+            onArchiveToggleThread: { _ in },
+            onDeleteThread: { _ in }
+        )
+    }
+    .background(Color(.systemBackground))
+    .environment(CodexService())
+}
+
+#Preview("Sidebar Thread Block — Dark") {
+    sidebarThreadBlockPreviewBody()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Sidebar Thread Block — Light") {
+    sidebarThreadBlockPreviewBody()
+        .preferredColorScheme(.light)
 }
