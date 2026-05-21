@@ -408,6 +408,7 @@ final class TurnComposerSendAvailabilityTests: XCTestCase {
             composerMentionedPlugins: [],
             composerReviewSelection: nil,
             isSubagentsSelectionArmed: false,
+            isPlanModeArmed: false,
             isVoiceRecording: false,
             voiceAudioLevels: [],
             voiceRecordingDuration: 0

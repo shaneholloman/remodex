@@ -158,7 +158,9 @@ extension CodexService {
         finalizeAllStreamingState()
         messagePersistenceDebounceTask?.cancel()
         messagePersistenceDebounceTask = nil
-        messagePersistence.save(messagesByThread)
+        if !suspendAutomaticMacScopedPersistence {
+            persistCurrentMacMessages()
+        }
         assistantCompletionFingerprintByThread.removeAll()
         recentActivityLineByThread.removeAll()
         removeAllThreadTimelineState()
@@ -243,7 +245,7 @@ extension CodexService {
         lastAppliedBridgeOutboundSeq = 0
         shouldForceQRBootstrapOnNextHandshake = false
         trustedReconnectFailureCount = 0
-        if let trustedMac = preferredTrustedMacRecord {
+        if let trustedMac = currentTrustedMacRecord {
             secureConnectionState = .liveSessionUnresolved
             secureMacFingerprint = codexSecureFingerprint(for: trustedMac.macIdentityPublicKey)
         } else {
@@ -276,7 +278,7 @@ extension CodexService {
     }
 
     func forgetTrustedMac(deviceId: String? = nil) {
-        let targetDeviceId = deviceId ?? preferredTrustedMacDeviceId
+        let targetDeviceId = deviceId ?? normalizedCurrentTrustedMacDeviceId
         guard let targetDeviceId else {
             return
         }
@@ -284,9 +286,15 @@ extension CodexService {
         trustedMacRegistry.records.removeValue(forKey: targetDeviceId)
         SecureStore.writeCodable(trustedMacRegistry, for: CodexSecureKeys.trustedMacRegistry)
 
+        if normalizedCurrentTrustedMacDeviceId == targetDeviceId {
+            setCurrentTrustedMacDeviceId(nil)
+        }
         if normalizedLastTrustedMacDeviceId == targetDeviceId {
             SecureStore.deleteValue(for: CodexSecureKeys.lastTrustedMacDeviceId)
             lastTrustedMacDeviceId = nil
+        }
+        if normalizedPreviousTrustedMacDeviceId == targetDeviceId {
+            clearPreviousTrustedMacDeviceId()
         }
 
         if normalizedRelayMacDeviceId == targetDeviceId {
@@ -305,7 +313,7 @@ extension CodexService {
             return
         }
 
-        if preferredTrustedMacDeviceId != nil {
+        if normalizedCurrentTrustedMacDeviceId != nil {
             forgetTrustedMac()
             return
         }
@@ -432,12 +440,12 @@ extension CodexService {
         } else if let bridgeVersion, !bridgeVersion.isEmpty,
                   let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This device bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This device bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else {
-            promptMessage = "This computer bridge requires a newer Remodex iPhone app. Update the app, then reconnect."
+            promptMessage = "This device bridge requires a newer Remodex iPhone app. Update the app, then reconnect."
         }
 
         bridgeUpdatePrompt = CodexBridgeUpdatePrompt(
@@ -453,17 +461,17 @@ extension CodexService {
         if let bridgeVersion, !bridgeVersion.isEmpty,
            let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This device bridge is running Remodex \(bridgeVersion), which requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
         if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This device bridge requires Remodex iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
-        return .invalidInput("This computer bridge requires a newer Remodex iPhone app. Update the app, then reconnect.")
+        return .invalidInput("This device bridge requires a newer Remodex iPhone app. Update the app, then reconnect.")
     }
 
     // Classifies socket failures so transient relay hiccups reconnect, while dead pairings are forgotten.
@@ -709,7 +717,8 @@ extension CodexService {
     var hasTrustedReconnectContext: Bool {
         guard hasSavedRelaySession,
               !shouldForceQRBootstrapOnNextHandshake,
-              let relayMacDeviceId = normalizedRelayMacDeviceId else {
+              let relayMacDeviceId = normalizedRelayMacDeviceId,
+              normalizedCurrentTrustedMacDeviceId == nil || normalizedCurrentTrustedMacDeviceId == relayMacDeviceId else {
             return false
         }
 
@@ -889,7 +898,7 @@ extension CodexService {
             case .posix(let code) where code == .EMSGSIZE:
                 return oversizedRelayPayloadMessage
             case .posix(let code) where code == .ENETDOWN || code == .ENETUNREACH || code == .EHOSTUNREACH:
-                return "Cannot reach relay server at \(attemptedURL). Check that the iPhone can access the paired computer on the local network."
+                return "Cannot reach relay server at \(attemptedURL). Check that the iPhone can access the paired device on the local network."
             case .posix(let code) where code == .ETIMEDOUT:
                 return "Connection timed out. Check server/network."
             case .dns(let code):
@@ -1113,7 +1122,7 @@ extension CodexService {
 
         switch rawValue {
         case 4001:
-            return "This relay session was replaced by another computer connection. Scan a new QR code to reconnect."
+            return "This relay session was replaced by another device connection. Scan a new QR code to reconnect."
         case 4003:
             return "This device was replaced by a newer connection. Scan a new QR code to reconnect."
         default:
@@ -1127,7 +1136,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Remodex will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved device. Remodex will keep retrying. If you restarted the bridge on that device, scan the new QR code."
     }
 
     func retryableSessionUnavailableMessage(forConnectError error: Error) -> String? {
@@ -1135,7 +1144,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Remodex will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved device. Remodex will keep retrying. If you restarted the bridge on that device, scan the new QR code."
     }
 
     // Surfaces relay-enforced drops that keep the pairing valid but lost the current send.
@@ -1145,7 +1154,7 @@ extension CodexService {
             return nil
         }
 
-        return "The paired computer was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
+        return "The paired device was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
     }
 
     func shouldClearSavedRelaySession(for closeCode: NWProtocolWebSocket.CloseCode?) -> Bool {

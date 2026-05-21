@@ -32,10 +32,16 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
 
     let onClose: () -> Void
     let onOpenSettings: () -> Void
+    let onOpenDevicesSettings: () -> Void
     let onOpenTerminal: () -> Void
     let onOpenNewChatDraft: (NewChatDraftSource, String?) -> Void
     let onNewChatCreationStateChange: (Bool) -> Void
     let onOpenThread: (CodexThread) -> Void
+    // Trusted-device switching context surfaced by the bottom devices menu so
+    // the circle button can disable items mid-switch.
+    let isSwitchingMac: Bool
+    let switchingMacDeviceId: String?
+    let onSelectTrustedDevice: (String) -> Void
     // Centered connect/reconnect card shown when the relay is offline and the
     // sidebar has no cached chats. ContentView owns the underlying connection
     // state and actions; the sidebar just slots the panel into the empty area.
@@ -685,17 +691,22 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
             if shouldShowSyncStatus {
                 SidebarThreadsInlineLoadingView()
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
+
+                Spacer(minLength: 0)
             } else {
                 SidebarContentScopePicker(selection: $selectedContentScope)
+                    .fixedSize(horizontal: true, vertical: false)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            }
 
-            if shouldShowToggle && !shouldShowSyncStatus {
-                SidebarFolderExpansionToggleButton(
-                    areAllFoldersCollapsed: areAllCollapsed,
-                    action: { toggleAllProjectFolders(projectGroupIDs) }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                Spacer(minLength: 0)
+
+                if shouldShowToggle {
+                    SidebarFolderExpansionToggleButton(
+                        areAllFoldersCollapsed: areAllCollapsed,
+                        action: { toggleAllProjectFolders(projectGroupIDs) }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
         }
     }
@@ -704,8 +715,12 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
         SidebarBottomActionBar(
             isChatEnabled: canCreateThread,
             isCreatingThread: isCreatingThread,
+            isSwitchingMac: isSwitchingMac,
+            switchingMacDeviceId: switchingMacDeviceId,
             onTapChat: handleRootlessChatDraftTap,
-            onTapTerminal: openTerminal
+            onTapTerminal: openTerminal,
+            onSelectTrustedDevice: onSelectTrustedDevice,
+            onOpenDevicesSettings: onOpenDevicesSettings
         )
     }
 
@@ -717,6 +732,7 @@ struct SidebarView<ConnectionEmptyStatePanel: View, ConnectionEmptyStateFooter: 
             onQuickChat: handleQuickChatTap,
             onNewProject: handleNewProjectTap,
             onOpenTerminal: openTerminal,
+            onOpenConnections: onOpenDevicesSettings,
             onOpenSettings: openSettings
         )
     }
@@ -872,7 +888,7 @@ private struct SidebarPromptsModifier: ViewModifier {
                 Button("Remove from Phone", role: .destructive, action: confirmDeleteProjectGroup)
                 Button("Cancel", role: .cancel, action: cancelDeleteProjectGroup)
             } message: {
-                Text("Chats for this project will be deleted only from Remodex on this phone. Nothing is removed from your computer or Codex observer.")
+                Text("Chats for this project will be deleted only from Remodex on this phone. Nothing is removed from your device or Codex observer.")
             }
             .alert(
                 "Remove \"\(threadDeleteTitle)\" from this phone?",
@@ -881,7 +897,7 @@ private struct SidebarPromptsModifier: ViewModifier {
                 Button("Remove from Phone", role: .destructive, action: confirmDeleteThread)
                 Button("Cancel", role: .cancel, action: cancelDeleteThread)
             } message: {
-                Text("This only removes the chat from Remodex on this phone. Nothing is removed from your computer or Codex observer.")
+                Text("This only removes the chat from Remodex on this phone. Nothing is removed from your device or Codex observer.")
             }
             .alert("Action failed", isPresented: errorPresented) {
                 Button("OK", role: .cancel, action: dismissError)
