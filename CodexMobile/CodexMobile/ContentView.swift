@@ -29,6 +29,12 @@ enum ContentNavigationRoute: Hashable {
     case terminal(preferredWorkingDirectory: String?)
 }
 
+private struct MacContextTransitionSnapshot {
+    let selectedThread: CodexThread?
+    let activeThreadId: String?
+    let suppressAutomaticThreadSelection: Bool
+}
+
 struct ContentView: View {
     @Environment(CodexService.self) private var codex
     @Environment(SubscriptionService.self) private var subscriptions
@@ -1949,10 +1955,34 @@ struct ContentView: View {
         }
     }
 
+    private func captureMacContextTransitionSnapshot() -> MacContextTransitionSnapshot {
+        MacContextTransitionSnapshot(
+            selectedThread: selectedThread,
+            activeThreadId: codex.activeThreadId,
+            suppressAutomaticThreadSelection: suppressAutomaticThreadSelection
+        )
+    }
+
+    // Restores the chat selection only when the service kept an existing Mac alive after a failed saved-device switch.
+    private func restoreMacContextTransitionSnapshotIfStillConnected(_ snapshot: MacContextTransitionSnapshot) {
+        guard codex.isConnected || codex.isInitialized else {
+            return
+        }
+
+        if let selectedThread = snapshot.selectedThread {
+            self.selectedThread = codex.threads.first(where: { $0.id == selectedThread.id }) ?? selectedThread
+        } else {
+            self.selectedThread = nil
+        }
+        codex.activeThreadId = snapshot.activeThreadId
+        suppressAutomaticThreadSelection = snapshot.suppressAutomaticThreadSelection
+    }
+
     private func switchToTrustedMac(_ deviceId: String) {
         guard !viewModel.isSwitchingMac else {
             return
         }
+        let contextTransitionSnapshot = captureMacContextTransitionSnapshot()
         prepareForMacContextTransition()
         macSwitchTask = Task {
             do {
@@ -1961,7 +1991,9 @@ struct ContentView: View {
                     navigationPath.removeAll()
                 }
             } catch {
-                // Error is already routed through CodexService state for the page to present.
+                await MainActor.run {
+                    restoreMacContextTransitionSnapshotIfStillConnected(contextTransitionSnapshot)
+                }
             }
             await MainActor.run {
                 macSwitchTask = nil
