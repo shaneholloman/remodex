@@ -150,10 +150,20 @@ async function main({
       consoleImpl,
       exitImpl,
     });
-    consoleImpl.log("[remodex] Refreshing bridge pairing QR...");
     const result = await deps.startMacOSBridgeService({
       waitForPairing: true,
     });
+    if (jsonOutput) {
+      emitJson({
+        ok: true,
+        currentVersion: version,
+        plistPath: result?.plistPath,
+        pairingSession: result?.pairingSession,
+      });
+      return;
+    }
+
+    consoleImpl.log("[remodex] Refreshing bridge pairing QR...");
     deps.printMacOSBridgePairingQr({
       pairingSession: result.pairingSession,
     });
@@ -265,7 +275,7 @@ async function main({
   consoleImpl.error(
     "Usage: remodex up | remodex run | remodex start | remodex restart | remodex qr | remodex pair | remodex stop | remodex status | "
     + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | "
-    + "append --json to start/restart/stop/status/reset-pairing/resume for machine-readable output"
+    + "append --json to start/restart/qr/pair/stop/status/reset-pairing/resume for machine-readable output"
   );
   exitImpl(1);
 }

@@ -208,6 +208,61 @@ test("remodex pair is an alias for the QR refresh flow", async () => {
   ]);
 });
 
+test("remodex pair --json exposes the refreshed pairing payload", async () => {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+
+  process.stdout.write = (chunk, encoding, callback) => {
+    writes.push(String(chunk));
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+
+  try {
+    await main({
+      argv: ["node", "remodex", "pair", "--json"],
+      platform: "darwin",
+      consoleImpl: {
+        log(message) {
+          throw new Error(`unexpected log: ${message}`);
+        },
+        error(message) {
+          throw new Error(`unexpected error: ${message}`);
+        },
+      },
+      exitImpl(code) {
+        throw new Error(`unexpected exit ${code}`);
+      },
+      deps: {
+        async startMacOSBridgeService(options) {
+          assert.deepEqual(options, { waitForPairing: true });
+          return {
+            plistPath: "/tmp/remodex.plist",
+            pairingSession: {
+              pairingPayload: {
+                sessionId: "session-json-pair",
+              },
+            },
+          };
+        },
+        printMacOSBridgePairingQr() {
+          throw new Error("QR printer should not run for --json");
+        },
+      },
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const payload = JSON.parse(writes.join("").trim());
+  assert.equal(payload.ok, true);
+  assert.equal(payload.currentVersion, version);
+  assert.equal(payload.plistPath, "/tmp/remodex.plist");
+  assert.equal(payload.pairingSession?.pairingPayload?.sessionId, "session-json-pair");
+});
+
 test("runCli prints expected failures without a Node stack trace", async () => {
   const messages = [];
   let exitCode = null;
