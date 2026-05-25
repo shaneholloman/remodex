@@ -768,7 +768,6 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                 + "messageCount=\(messages.count) visibleTail=\(visibleTailCount)"
         )
         recomputeRenderItemsAndBlockInfoIfNeeded()
-        scheduleProgressiveTailRevealIfNeeded()
         handleTimelineMutation(using: proxy)
     }
 
