@@ -1381,6 +1381,37 @@ final class CodexServiceIncomingCommandExecutionTests: XCTestCase {
         XCTAssertEqual(userRows[0].skillMentions, ["check-code"])
     }
 
+    func testMirroredOpeningUserMessageAnchorsBeforeExistingTurnOutput() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+
+        service.appendMessage(
+            CodexMessage(
+                id: "assistant-first",
+                threadId: threadID,
+                role: .assistant,
+                text: "Already streaming from desktop",
+                turnId: turnID,
+                itemId: "assistant-item",
+                isStreaming: true,
+                orderIndex: 10
+            )
+        )
+
+        service.appendConfirmedMirroredUserMessage(
+            threadId: threadID,
+            turnId: turnID,
+            text: "let's hope now it will"
+        )
+
+        let messages = service.messages(for: threadID)
+
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant])
+        XCTAssertLessThan(messages[0].orderIndex, messages[1].orderIndex)
+        XCTAssertEqual(messages[0].text, "let's hope now it will")
+    }
+
     func testThreadReadDecodesTurnIdAliasAndRejectsEpochHistoryTimestamp() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"

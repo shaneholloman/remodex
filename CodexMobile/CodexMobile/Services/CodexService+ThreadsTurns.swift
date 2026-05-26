@@ -1747,6 +1747,7 @@ extension CodexService {
         mentionMentions: [CodexTurnMention] = [],
         fileMentions: [String] = [],
         shouldAppendUserMessage: Bool = true,
+        preAppendedUserMessageID: String? = nil,
         collaborationMode: CodexCollaborationModeKind? = nil
     ) async throws {
         let normalizedThreadID = normalizedInterruptIdentifier(threadId) ?? threadId
@@ -1758,8 +1759,12 @@ extension CodexService {
             threadId: normalizedThreadID,
             collaborationMode: effectiveRequestedCollaborationMode
         )
-        let pendingMessageId = shouldAppendUserMessage
-            ? appendUserMessage(
+        let normalizedPreAppendedUserMessageID = normalizedInterruptIdentifier(preAppendedUserMessageID)
+        let pendingMessageId: String
+        if let normalizedPreAppendedUserMessageID {
+            pendingMessageId = normalizedPreAppendedUserMessageID
+        } else if shouldAppendUserMessage {
+            pendingMessageId = appendUserMessage(
                 threadId: normalizedThreadID,
                 text: displayTextForOutgoingTurn(
                     userInput: userInput,
@@ -1778,7 +1783,9 @@ extension CodexService {
                     return normalized.isEmpty ? nil : normalized
                 }
             )
-            : ""
+        } else {
+            pendingMessageId = ""
+        }
         var resolvedExpectedTurnID = normalizedInterruptIdentifier(expectedTurnId)
         if resolvedExpectedTurnID == nil {
             do {

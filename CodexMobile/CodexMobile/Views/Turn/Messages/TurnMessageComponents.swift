@@ -342,6 +342,7 @@ struct MessageRow: View, Equatable {
     @State private var throttledAssistantDisplayText: String?
     @State private var pendingAssistantDisplayText: String?
     @State private var assistantDisplayUpdateTask: Task<Void, Never>?
+    @State private var assistantDisplaySyncTask: Task<Void, Never>?
     @State private var textExpansionLevel = 0
     @State private var previewImage: PreviewImagePayload?
 
@@ -465,7 +466,7 @@ struct MessageRow: View, Equatable {
             synchronizeAssistantDisplayText(immediate: true)
         }
         .onChange(of: message.text) { _, _ in
-            synchronizeAssistantDisplayText(immediate: shouldSynchronizeAssistantDisplayImmediately())
+            scheduleAssistantDisplayTextSync(immediate: shouldSynchronizeAssistantDisplayImmediately())
         }
         .onChange(of: message.isStreaming) { _, isStreaming in
             synchronizeAssistantDisplayText(immediate: !isStreaming)
@@ -474,6 +475,8 @@ struct MessageRow: View, Equatable {
             synchronizeAssistantDisplayText(immediate: true)
         }
         .onDisappear {
+            assistantDisplaySyncTask?.cancel()
+            assistantDisplaySyncTask = nil
             assistantDisplayUpdateTask?.cancel()
             assistantDisplayUpdateTask = nil
         }
@@ -780,8 +783,23 @@ struct MessageRow: View, Equatable {
 
     // Throttles only the assistant row's visible text during streaming so markdown/layout
     // work stays local to that cell instead of firing on every token delta.
+    private func scheduleAssistantDisplayTextSync(immediate: Bool) {
+        assistantDisplaySyncTask?.cancel()
+        // Streaming can deliver several String changes in one SwiftUI frame. Deferring
+        // this state write avoids the "onChange(of: String) updated multiple times"
+        // runtime warning while still applying the newest text on the next turn.
+        assistantDisplaySyncTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            synchronizeAssistantDisplayText(immediate: immediate)
+            assistantDisplaySyncTask = nil
+        }
+    }
+
     private func synchronizeAssistantDisplayText(immediate: Bool) {
         guard message.role == .assistant else {
+            assistantDisplaySyncTask?.cancel()
+            assistantDisplaySyncTask = nil
             throttledAssistantDisplayText = nil
             pendingAssistantDisplayText = nil
             assistantDisplayUpdateTask?.cancel()

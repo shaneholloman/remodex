@@ -12,6 +12,7 @@ private struct TurnTimelineRenderCacheState: Equatable {
     var blockInfoByMessageID: [String: AssistantBlockAccessoryState] = [:]
     var newestStreamingMessageID: String?
     var renderItemsSignature: TurnTimelineRenderItemsCacheSignature?
+    var renderItemsShapeSignature: Int?
     var visibleRenderItems: [TurnTimelineRenderItem] = []
     var blockInfoInputKey: Int?
 }
@@ -120,9 +121,47 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
         return messages[startIndex...]
     }
 
-    // Never project inside `body`; stale cache is refreshed by lifecycle handlers.
+    // Renders appended/removed rows immediately if SwiftUI reaches body before the
+    // lifecycle cache refresh. Assistant text-only deltas still use the cached rows.
     private var visibleRenderItems: [TurnTimelineRenderItem] {
-        renderCacheState.visibleRenderItems
+        let visibleSlice = visibleMessages
+        guard renderItemsShapeSignature(for: visibleSlice) != renderCacheState.renderItemsShapeSignature else {
+            return renderCacheState.visibleRenderItems
+        }
+
+        return TurnTimelineRenderProjection.project(
+            messages: Array(visibleSlice),
+            completedTurnIDs: completedTurnIDs,
+            activeTurnID: activeTurnID,
+            isThreadRunning: isThreadRunning
+        )
+    }
+
+    private func renderItemsShapeSignature(for messages: ArraySlice<CodexMessage>) -> Int {
+        var hasher = Hasher()
+        hasher.combine(threadID)
+        hasher.combine(visibleTailCount)
+        hasher.combine(messages.count)
+        hasher.combine(activeTurnID)
+        hasher.combine(isThreadRunning)
+        hasher.combine(completedTurnIDs)
+
+        if let message = messages.first {
+            hasher.combine(message.id)
+            hasher.combine(message.orderIndex)
+        }
+
+        if let message = messages.last {
+            hasher.combine(message.id)
+            hasher.combine(message.role)
+            hasher.combine(message.kind)
+            hasher.combine(message.turnId)
+            hasher.combine(message.deliveryState)
+            hasher.combine(message.isStreaming)
+            hasher.combine(message.orderIndex)
+        }
+
+        return hasher.finalize()
     }
 
     private var hasEarlierMessages: Bool {
@@ -429,6 +468,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
         let visible = Array(visibleSlice)
         var nextState = renderCacheState
         var didChange = false
+        let shapeSignature = renderItemsShapeSignature(for: visibleSlice)
 
         // Block-info placement depends on collapsed render items, so keep the
         // projection fresh before deriving accessory state.
@@ -442,6 +482,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                     isThreadRunning: isThreadRunning
                 )
                 nextState.renderItemsSignature = signature
+                nextState.renderItemsShapeSignature = shapeSignature
                 didChange = true
             }
         }
